@@ -1,0 +1,55 @@
+name: Refresh private iCloud calendar snapshot
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - sync.py
+      - calendar_write.py
+      - calendar_commands.json
+      - requirements.txt
+      - .github/workflows/sync.yml
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: icloud-calendar-snapshot
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: ${{ vars.ICLOUD_CALENDARS != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Read iCloud calendars
+        env:
+          ICLOUD_USERNAME: ${{ secrets.ICLOUD_USERNAME }}
+          ICLOUD_APP_PASSWORD: ${{ secrets.ICLOUD_APP_PASSWORD }}
+          BRIDGE_TIMEZONE: Europe/Berlin
+          SYNC_DAYS_PAST: "7"
+          SYNC_DAYS_FUTURE: "90"
+          ICLOUD_CALENDARS: ${{ vars.ICLOUD_CALENDARS }}
+        run: python sync.py
+      - name: Save snapshot when calendar data changed
+        run: |
+          if [ -z "$(git status --porcelain -- calendar_snapshot.json)" ]; then
+            echo "Calendar snapshot unchanged."
+            exit 0
+          fi
+          git config user.name "iCloud Calendar Snapshot"
+          git config user.email "actions@users.noreply.github.com"
+          git add calendar_snapshot.json
+          git commit -m "Update private calendar snapshot"
+          git pull --rebase origin main
+          git push
